@@ -9,6 +9,7 @@ http://groups.google.com/group/trec-kba
 '''
 ## use float division instead of integer division
 from __future__ import division
+from itertools import izip, count
 
 __usage__ = '''
 python -m kba.score.ccr submissions trec-kba-ccr-judgments-2013-07-08.before-and-after-cutoff.filter-run.txt
@@ -27,9 +28,10 @@ from datetime import datetime
 from collections import defaultdict
 
 from kba.scorer._metrics import compile_and_average_performance_metrics, find_max_scores
-from kba.scorer._outputs import write_team_summary, write_graph, write_performance_metrics, log
+from kba.scorer._outputs import write_team_summary, write_graph, write_performance_metrics, write_unjudged_metrics, log
 
-def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotated_is_TN, include_training, debug, thresh=2, require_positives=False):
+def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotated_is_TN, include_training, debug, thresh=2, require_positives=False,
+                           unjudged_output_filepath=None):
     '''
     This function generates the confusion matrix (number of true/false positives
     and true/false negatives.  
@@ -50,27 +52,31 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         run_file = open(path_to_run_file, 'r')
         
     ## Create a dictionary containing the confusion matrix (CM)
-    cutoffs = range(0, 999, cutoff_step)
+    cutoffs = range(0, 999, cutoff_step) + [999]
     CM = dict()
 
     ## count the total number of assertions per entity
     num_assertions = {}
 
     num_positives = defaultdict(int)
+    num_negatives = defaultdict(int)
     for (stream_id, target_id), is_positive in annotation.items():
         ## compute total counts of number of positives for each target_id
         if is_positive:
             num_positives[target_id] += 1
+        else:
+            num_negatives[target_id] += 1
 
         ## make sure that the confusion matrix has entries for all entities
         if target_id not in CM:
             CM[target_id] = dict()
             for cutoff in cutoffs:
-                CM[target_id][cutoff] = dict(TP=0, FP=0, FN=0, TN=0)     
+                CM[target_id][cutoff] = dict(TP=0, FP=0, FN=0, TN=0, UNJ=0, NUM=0)
 
     ## Iterate through every row of the run and construct a
     ## de-duplicated run summary
     run_set = dict()
+    all_conf_set = dict()
     for onerow in run_file:
         ## Skip Comments         
         if onerow.startswith('#') or len(onerow.strip()) == 0:
@@ -89,6 +95,14 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         row[5] = rating
 
         #log('ratings:  %r <?> %r' % (rating, thresh))
+
+        # keep track of confidences for each entity to compute precision@x
+        assertion_key = (stream_id, target_id)
+        if target_id not in all_conf_set:
+            all_conf_set[target_id] = list()
+        if unannotated_is_TN or (stream_id, target_id) in annotation:
+            all_conf_set[target_id].append((stream_id, conf))
+
         if rating < thresh:
             log('ignoring assertion below the rating threshold: %r < %r' % (rating, thresh))
             continue
@@ -97,7 +111,6 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
             log('ignoring assertion on entity for which no CCR positives are known: %s' % target_id)
             continue
 
-        assertion_key = (stream_id, target_id)
         if assertion_key in run_set:
             other_row = run_set[assertion_key]
             if other_row[4] > conf:
@@ -116,6 +129,14 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         #log('got a row: %r' % (row,))
         run_set[assertion_key] = row
 
+    # map target_id -> (stream_id -> rank)
+    conf_rank_dict = dict()
+    for target_id in all_conf_set:
+        all_conf_set[target_id].sort(key=lambda row: -row[1])
+        conf_rank_dict[target_id] = { stream_id: rank for rank,(stream_id,conf) in izip(count(),all_conf_set[target_id])}
+
+
+
     log('considering %d assertions' % len(run_set))
     run_set = run_set.values()
     while run_set:
@@ -126,6 +147,13 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         target_id = row[3]
         conf = row[4]
         rating = row[5]
+        if unannotated_is_TN or (stream_id, target_id) in annotation:
+            rank = conf_rank_dict[target_id][stream_id]
+        else:
+            rank = 1000
+
+        if args.rank_as_conf:
+            conf = 1000 -rank
 
         if target_id not in num_assertions:
             num_assertions[target_id] = {'total': 0,
@@ -141,22 +169,22 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
             num_assertions[target_id]['in_ETR'] += 1
 
         if (not include_training) and (timestamp <= END_OF_FEB_2012):
-            continue   
-        
+            continue
+
         in_annotation_set = (stream_id, target_id) in annotation
 
         if in_annotation_set:
             num_assertions[target_id]['in_annotation_set'] += 1
 
-        
+
         ## In the annotation set and useful
-        if in_annotation_set and annotation[(stream_id, target_id)]:            
-            for cutoff in cutoffs:                
+        if in_annotation_set and annotation[(stream_id, target_id)]:
+            for cutoff in cutoffs:
                 if conf > cutoff:
                     ## If above the cutoff: true-positive
-                    CM[target_id][cutoff]['TP'] += 1                    
-                   
-        ## In the annotation set and non-useful                       
+                    CM[target_id][cutoff]['TP'] += 1
+
+        ## In the annotation set and non-useful
         elif in_annotation_set and not annotation[(stream_id, target_id)]:
             for cutoff in cutoffs:
                 if conf > cutoff:
@@ -164,7 +192,7 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
                     CM[target_id][cutoff]['FP'] += 1
                 else:
                     ## Below the cutoff: true-negative
-                    CM[target_id][cutoff]['TN'] += 1            
+                    CM[target_id][cutoff]['TN'] += 1
         ## Not in the annotation set so its a negative (if flag is true)
         elif unannotated_is_TN:
             for cutoff in cutoffs:
@@ -173,8 +201,22 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
                     CM[target_id][cutoff]['FP'] += 1
                 else:
                     ## Below the cutoff: true-negative
-                    CM[target_id][cutoff]['TN'] += 1    
-    
+                    CM[target_id][cutoff]['TN'] += 1
+
+        if in_annotation_set:
+            for cutoff in cutoffs:
+                if not (stream_id, target_id) in annotation:
+                    if conf > cutoff:
+                        ## If above the cutoff: true-positive
+                        CM[target_id][cutoff]['UNJ'] += 1
+
+        if in_annotation_set:
+            for cutoff in cutoffs:
+                if conf > cutoff:
+                    ## If above the cutoff: true-positive
+                    CM[target_id][cutoff]['NUM'] += 1
+
+
     ## Correct FN for things in the annotation set that are NOT in the run
     ## First, calculate number of true things in the annotation set
     annotation_positives = defaultdict(int)
@@ -202,6 +244,15 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
 
     log( 'showing assertion counts:' )
     log( json.dumps(num_assertions, indent=4, sort_keys=True) )
+
+
+    unjudgedstats = list()
+    for target_id in CM:
+        #print ','.join(['unjudged',target_id,CM[target_id][0]['UNJ']] + [CM[target_id][cutoff]['UNJ'] for cutoff in reversed(cutoffs) if cutoff > 700])
+        #print ','.join(['predict ',target_id,CM[target_id][0]['NUM']]+[CM[target_id][cutoff]['NUM'] for cutoff in reversed(cutoffs) if cutoff > 700])
+        unjudgedstats.append((target_id, CM[target_id][0]['UNJ'], [CM[target_id][cutoff]['UNJ'] for cutoff in reversed(cutoffs) if cutoff > 700], CM[target_id][0]['NUM'], [CM[target_id][cutoff]['NUM'] for cutoff in reversed(cutoffs) if cutoff > 700]))
+
+    write_unjudged_metrics(unjudged_output_filepath, unjudgedstats, cutoffs=[cutoff for cutoff in reversed(cutoffs) if cutoff > 700])
 
     return CM
     
@@ -318,11 +369,23 @@ def make_description(args):
     else:
         any_up = ''
 
+    if args.rank_as_conf:
+        rank_as_conf = '-rank-as-conf'
+    else:
+        rank_as_conf = ''
+
+
+    if args.unan_is_true:
+        unan_is_true = '-unan-is-true'
+    else:
+        unan_is_true = ''
     description = 'ccr' \
             + entities \
             + rating_types \
             + req_pos \
             + any_up \
+            + rank_as_conf \
+            + unan_is_true \
             + '-cutoff-step-size-' \
             + str(args.cutoff_step)
 
@@ -336,12 +399,18 @@ def process_run(args, run_file_name, annotation, description, thresh):
     '''
     ## Generate confusion matrices from a run for each target_id
     ## and for each step of the confidence cutoff
+    base_output_filepath = os.path.join(
+        args.run_dir,
+        run_file_name + '-' + description)
+    unjudged_output_filepath = base_output_filepath+'_unjudged.csv'
+
+
     stats = build_confusion_matrix(
         os.path.join(args.run_dir, run_file_name) + '.gz',
         annotation, args.cutoff_step, args.unan_is_true, args.include_training,
         thresh=thresh,
         require_positives=args.require_positives,
-        debug=args.debug)
+        debug=args.debug, unjudged_output_filepath=unjudged_output_filepath)
 
     compile_and_average_performance_metrics(stats)
 
@@ -349,11 +418,8 @@ def process_run(args, run_file_name, annotation, description, thresh):
 
     log(json.dumps(stats, indent=4, sort_keys=True))
 
-    base_output_filepath = os.path.join(
-        args.run_dir, 
-        run_file_name + '-' + description)
-
     output_filepath = base_output_filepath + '.csv'
+
     write_performance_metrics(output_filepath, stats)
 
     ## Output a graph of the key performance statistics
@@ -393,15 +459,18 @@ def score_all_runs(args, description, reject):
     team_scores = defaultdict(lambda: defaultdict(dict))
     for run_file in os.listdir(args.run_dir):
         if not run_file.endswith('.gz'):
+            print 'ignoring %s because it does not end on *gz'%run_file
             continue
         
         if args.run_name_filter and not run_file.startswith(args.run_name_filter):
+            print 'filename filter set to %s, but does not match %s'%(args.run_name_filter, run_file)
             continue
 
         ## take the name without the .gz
         run_file_name = '.'.join(run_file.split('.')[:-1])
         log( 'processing: %s.gz' % run_file_name )
-        
+        print( 'processing: %s.gz' % run_file_name )
+
         max_scores = process_run(args, run_file_name, annotation, description, thresh)
 
         ## split into team name and create stats file
@@ -470,6 +539,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '--run-name-filter', default=None,
         help='beginning of string of filename to filter runs that get considered')
+    parser.add_argument(
+        '--rank-as-conf', default=False, action='store_true',
+        help='compute rank cutoffs induces from confidence cutoffs')
+
     args = parser.parse_args()
 
     accepted_target_ids = set()

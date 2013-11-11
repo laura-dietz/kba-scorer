@@ -7,6 +7,7 @@ from __future__ import division
 from collections import defaultdict
 import sys
 import json
+import numpy as np
 
 def getMedian(numericValues):
     '''
@@ -199,8 +200,28 @@ def _average(stats, metrics=['P', 'R', 'SU'], weight=lambda target_id: 1, name='
     '''
     num_entities = sum(is_valid_target_id(key) for key in stats)
     _average = defaultdict(lambda: defaultdict(float))
+    _stderr = defaultdict(lambda: defaultdict(float))
+
+    cutoffs = { offset
+                for target_id in stats
+                for offset in stats[target_id].keys()
+              }
+
+    #for metric in ['P', 'R', 'SU', 'F']:
+    #    values = { cutoff : [stats[target_id][cutoff][metric] * weight(target_id)
+    #                for target_id in stats
+    #                if cutoff in stats[target_id] and is_valid_target_id(target_id)
+    #               ]
+    #               for cutoff in sorted(cutoffs)
+    #             }
+    #
+    #for cutoff in cutoffs:
+    #    _average[cutoff][metric] = np.mean(values[cutoff])
+    #    _stderr[cutoff][metric] = np.std(values[cutoff]) / np.sqrt(len(values[cutoff]))
+    #
+
     for target_id in stats:
-        if not is_valid_target_id(target_id): 
+        if not is_valid_target_id(target_id):
             ## ignore non-query keys, e.g. "micro_average"
             continue
         for cutoff in stats[target_id]:
@@ -208,13 +229,14 @@ def _average(stats, metrics=['P', 'R', 'SU'], weight=lambda target_id: 1, name='
                 #print 'including in average: %r --> %r' % (target_id, stats[target_id][cutoff])
                 _average[cutoff][metric] += stats[target_id][cutoff][metric] * weight(target_id) / num_entities
 
-    if 'P' in metrics and 'R' in metrics:
-        for cutoff in _average:
-            _average[cutoff]['F'] = fscore(precision=_average[cutoff]['P'], 
-                                           recall   =_average[cutoff]['R'])
+    #if 'P' in metrics and 'R' in metrics:
+    #    for cutoff in _average:
+    #        _average[cutoff]['F'] = fscore(precision=_average[cutoff]['P'],
+    #                                       recall   =_average[cutoff]['R'])
 
     print 'computed %s using num_entities=%d' % (name, num_entities)
     stats[name] = _average
+    stats['%sStdErr'%name] = _stderr
 
 def find_max_scores(stats):
     '''

@@ -16,7 +16,8 @@ except ImportError:
     plt = None
 
 def log(m):
-    print m
+    pass
+    #print m
     #sys.stdout.flush()
 
 def write_graph(path_to_write_graph, stats):
@@ -36,6 +37,9 @@ def write_graph(path_to_write_graph, stats):
 
     plt.figure()
     Precision = list()
+    PrecisionStdErr = list()
+    PrecisionLower = list()
+    PrecisionUpper = list()
     Recall = list()
     Fscore = list()
     ScaledUtil = list()
@@ -44,15 +48,21 @@ def write_graph(path_to_write_graph, stats):
         Xaxis.append(cutoff)
         Recall.append(stats[cutoff]['R'])
         Precision.append(stats[cutoff]['P'])
+        #PrecisionStdErr.append(stats[cutoff]['PStdErr'])
+        #PrecisionLower.append(stats[cutoff]['P']- stats[cutoff]['PStdErr'])
+        #PrecisionUpper.append(stats[cutoff]['P']+ stats[cutoff]['PStdErr'])
         Fscore.append(stats[cutoff]['F'])
         ScaledUtil.append(stats[cutoff]['SU'])
 
+    print sorted(stats,reverse=True)
+    print Precision
     plt.plot(Xaxis, Precision, label='Precision')
+    #plt.fill_between(Xaxis, PrecisionLower, PrecisionUpper)
     plt.plot(Xaxis, Recall, label='Recall')
     plt.plot(Xaxis, Fscore, label='F-Score')
     plt.plot(Xaxis, ScaledUtil, label='Scaled Utility')
     plt.xlabel('Cutoff')
-    plt.ylim(-0.01, 1.3)
+    plt.ylim(-0.01, 1.0)
     plt.xlim(1000,0)
     plt.legend(loc='upper right')        
     plt.savefig(path_to_write_graph)
@@ -61,10 +71,36 @@ def write_graph(path_to_write_graph, stats):
     log( ' wrote plot image to %s' % path_to_write_graph )
 
 
+def write_unjudged_metrics(path_to_write_csv, unjudgedstats, cutoffs):
+    '''
+    Write a CSV file with statistics on unjudged elements and number of predictions per cutoff
+
+    :param path_to_write_csv: string with CSV file destination
+
+    :param stats: tuple containing counts per cutoff for each target_id
+    '''
+    writer = csv.writer(open(path_to_write_csv, 'wb'), delimiter=',')
+    ## Write a header
+    writer.writerow(['stat','target_id','total']+cutoffs)
+
+    def percent(unjudged, predicted):
+        if(predicted >0):
+            return 100.0 * unjudged / predicted
+        else:
+            return 0.0
+    ## Write the metrics for each cutoff and target_id to a new line,
+    ## where target_id also takes special value of "average"
+
+
+    for (target_id, total_unjudged, unjudged_per_cutoff, total_predicted, predicted_per_cutoff) in unjudgedstats:
+            writer.writerow(['unjudged',target_id, total_unjudged]+unjudged_per_cutoff)
+            writer.writerow(['predict ',target_id, total_predicted]+predicted_per_cutoff)
+            writer.writerow(['percent ',target_id, percent(total_unjudged, total_predicted) ]+ [percent(unj,pred) for (unj, pred) in zip(unjudged_per_cutoff,  predicted_per_cutoff)])
+
 def write_performance_metrics(path_to_write_csv, stats):
     '''
     Write a CSV file with the performance metrics at each cutoff
-    
+
     :param path_to_write_csv: string with CSV file destination
 
     :param stats: dict containing confusion matrix elements and
@@ -73,15 +109,15 @@ def write_performance_metrics(path_to_write_csv, stats):
     writer = csv.writer(open(path_to_write_csv, 'wb'), delimiter=',')
     ## Write a header
     writer.writerow(['target_id','cutoff', 'TP', 'FP', 'FN', 'TN', 'P', 'R', 'F', 'SU'])
-    
+
     ## Write the metrics for each cutoff and target_id to a new line,
     ## where target_id also takes special value of "average"
     for target_id in sorted(stats):
         for cutoff in sorted(stats[target_id], reverse=True):
             writer.writerow([target_id, cutoff,
-                             stats[target_id][cutoff]['TP'], stats[target_id][cutoff]['FP'], 
+                             stats[target_id][cutoff]['TP'], stats[target_id][cutoff]['FP'],
                              stats[target_id][cutoff]['FN'], stats[target_id][cutoff]['TN'],
-                             stats[target_id][cutoff]['P'], stats[target_id][cutoff]['R'], 
+                             stats[target_id][cutoff]['P'], stats[target_id][cutoff]['R'],
                              stats[target_id][cutoff]['F'], stats[target_id][cutoff]['SU']])
 
 
