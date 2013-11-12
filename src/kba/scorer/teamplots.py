@@ -44,18 +44,44 @@ if __name__ == '__main__':
     dfmacro = df[np.logical_and(df['entity'] =='macro_average', df['cutoff'] ==0 )]
     dfmacro = df[df['entity'] =='macro_average']
     submissions =np.unique(dfmacro['run'])
-    for submission in submissions:
-        dplot = dfmacro[dfmacro['run']==submission]
-        if submission.startswith('CIIR-top2'):
+    for submissionRaw in submissions:
+        if 'wrm' in submissionRaw:
+            submission = 'rm'
+        elif 'wsdm' in submissionRaw:
+            submission = 'sdm'
+        elif 'wsdm' in submissionRaw:
+            submission = 'sdm'
+        elif 'wskq' in submissionRaw:
+            submission = 'skq'
+        elif 'wrn_' in submissionRaw:
+            submission = 'rn'
+        elif 'wrt_' in submissionRaw:
+            submission = 'rt'
+        elif 'wrtn' in submissionRaw:
+            submission = 'rtn'
+        elif 'LinkedMaxScoreOnlyTop__1.0' in submissionRaw:
+            submission = 'link top NIL'
+        elif 'LinkedMaxScoreOnlyTop' in submissionRaw:
+            submission = 'link top'
+        elif 'LinkedMaxScore__1.0' in submissionRaw:
+            submission = 'link NIL'
+        elif 'LinkedMaxScore' in submissionRaw:
+            submission = 'link'
+        elif 'LinkedProb' in submissionRaw:
+            submission = 'link LM'
+        else:
+            submission = submissionRaw
+        dplot = dfmacro[dfmacro['run']==submissionRaw]
+        if submissionRaw.startswith('CIIR-top2'):
             plt.plot(dplot['cutoff'], dplot[args.metric],'--', label=submission, alpha=0.5)
-        elif 'wrn' in submission or 'wrt' in submission or 'wrtn' in submission:
+        elif 'wrn' in submissionRaw or 'wrt' in submissionRaw or 'wrtn' in submissionRaw:
             plt.plot(dplot['cutoff'], dplot[args.metric],'.-', label=submission, alpha=0.5)
         else:
             plt.plot(dplot['cutoff'], dplot[args.metric], label=submission, alpha=0.5)
 
-    plt.xlim(1000,0)
+    plt.xlim(1000,950)
     plt.legend(loc='center left', bbox_to_anchor=(1. , 0.5), fontsize='small')
     plt.ylabel(args.metric)
     plt.savefig(
-        "%s-%s-plot.pdf" % (evalFile,args.metric),
+        "%s-%s-plot-950.pdf" % (evalFile,args.metric),
         bbox_inches='tight')
