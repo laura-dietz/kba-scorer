@@ -60,6 +60,7 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
 
     num_positives = defaultdict(int)
     num_negatives = defaultdict(int)
+
     for (stream_id, target_id), is_positive in annotation.items():
         ## compute total counts of number of positives for each target_id
         if is_positive:
@@ -71,7 +72,7 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         if target_id not in CM:
             CM[target_id] = dict()
             for cutoff in cutoffs:
-                CM[target_id][cutoff] = dict(TP=0, FP=0, FN=0, TN=0, UNJ=0, NUM=0)
+                CM[target_id][cutoff] = dict(TP=0, FP=0, FN=0, TN=0, UNJ=0, NUM=0, RCutoff=0)
 
     ## Iterate through every row of the run and construct a
     ## de-duplicated run summary
@@ -237,10 +238,18 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
 
             CM[target_id][cutoff]['FN'] = annotation_positives[target_id] - CM[target_id][cutoff]['TP']
 
+
             #log('CN[%s][cutoff=%d] = %r' % (target_id, cutoff, CM[target_id][cutoff]))
             assert annotation_positives[target_id] >= CM[target_id][cutoff]['TP'], \
                 "how did we get more TPs than available annotation_positives[target_id=%s] = %d >= %d = CM[target_id][cutoff=%f]['TP']" \
                 % (target_id, annotation_positives[target_id], CM[target_id][cutoff]['TP'], cutoff)
+
+        # compute R-precision
+        allCutoffs = list() + CM[target_id].keys()
+        numPos = annotation_positives[target_id]
+        if len(allCutoffs)>1:
+            closestCutoff = min(allCutoffs, key=lambda cutoff: abs(cutoff - numPos))
+            CM[target_id][0]['RCutoff'] = closestCutoff
 
     log( 'showing assertion counts:' )
     log( json.dumps(num_assertions, indent=4, sort_keys=True) )
@@ -251,8 +260,10 @@ def build_confusion_matrix(path_to_run_file, annotation, cutoff_step, unannotate
         #print ','.join(['unjudged',target_id,CM[target_id][0]['UNJ']] + [CM[target_id][cutoff]['UNJ'] for cutoff in reversed(cutoffs) if cutoff > 700])
         #print ','.join(['predict ',target_id,CM[target_id][0]['NUM']]+[CM[target_id][cutoff]['NUM'] for cutoff in reversed(cutoffs) if cutoff > 700])
         unjudgedstats.append((target_id, CM[target_id][0]['UNJ'], [CM[target_id][cutoff]['UNJ'] for cutoff in reversed(cutoffs) if cutoff > 700], CM[target_id][0]['NUM'], [CM[target_id][cutoff]['NUM'] for cutoff in reversed(cutoffs) if cutoff > 700]))
+        print 'RCutoff', target_id, CM[target_id][0]['RCutoff']
 
     write_unjudged_metrics(unjudged_output_filepath, unjudgedstats, cutoffs=[cutoff for cutoff in reversed(cutoffs) if cutoff > 700])
+
 
     return CM
     
@@ -338,6 +349,12 @@ def load_annotation(path_to_annotation_file, thresh, min_len_clean_visible, reje
     log('loaded annotation to create a dict of %d (stream_id, target_id) pairs with %d True' % (len(annotation), num_true))
     if num_true == 0:
         sys.exit('found no true positives given the filters')
+
+    annotation_entities = { target_id for stream_id, target_id in annotation.keys()}
+    print 'annotation entities:'
+    for entity in annotation_entities:
+        print '   \"%s\",'%entity
+
     return annotation
 
 def make_description(args):
@@ -450,7 +467,13 @@ def score_all_runs(args, description, reject):
                                  require_positives=args.require_positives
                                  )
     log( 'This assumes that all run file names end in .gz' )
-
+    annotationWriter = open('validassessments.csv', 'w')
+    for ((stream_id, target_id) , is_pos) in annotation.iteritems():
+        #'dde6ec  1332929640-c50cda6bee1564a599ae620d8918382e     http://en.wikipedia.org/wiki/Atacocha   1000    1       1332929640'
+        timestamp = int(stream_id.split('-')[0])
+        assessment = 1 if is_pos else 0
+        annotationWriter.write('reserved\t%s\t%s\t1000\t%d\t%s\n'%(stream_id, target_id, assessment, timestamp))
+    annotationWriter.close()
     #import gc
     #from guppy import hpy
     #hp = hpy()

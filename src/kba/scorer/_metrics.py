@@ -227,7 +227,13 @@ def _average(stats, metrics=['P', 'R', 'SU'], weight=lambda target_id: 1, name='
             _average[cutoff][metric] = 1. * np.mean(values[cutoff]) # / len(stats)
             _average[cutoff]['%sStdErr'%metric] = 1. * np.std(values[cutoff]) / np.sqrt(len(values[cutoff]))
 
+    for cutoff in cutoffs:
+        _average[cutoff]['RP']= np.mean([stats[target_id][stats[target_id][0]['RCutoff']]['P']
+                                         for target_id in stats
+                                         if cutoff in stats[target_id] and is_valid_target_id(target_id)
+                                        ])
 
+    print 'RPrecision', _average[0]['RP']
     #for target_id in stats:
     #    if not is_valid_target_id(target_id):
     #        ## ignore non-query keys, e.g. "micro_average"
